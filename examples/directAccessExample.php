@@ -3,7 +3,8 @@
 namespace MyCompany;
 
 use SimPro\Api\Client as SimProClient;
-use Eher\OAuth\Consumer as OAuthConsumer;
+use Ndm\OAuth\Consumer as OAuthConsumer;
+use Ndm\OAuth\SignatureMethod\Hmac;
 use \Monolog\Logger;
 
 if (PHP_SAPI != 'cli') die("This example must be run from the command line");
@@ -18,11 +19,11 @@ define("CONSUMER_SECRET", 'YOUR-SECRET');
 $Logger = new Logger('api-client');
 $Logger->pushHandler(new \Monolog\Handler\StreamHandler('php://stderr'), Logger::INFO);
 
-$Client = new SimProClient(SERVER , new OAuthConsumer(CONSUMER_KEY, CONSUMER_SECRET), null);
-$Client->setLogger($Logger);
-
+$AuthClient = new SimProClient(SERVER , new OAuthConsumer(CONSUMER_KEY, CONSUMER_SECRET, new Hmac()), null);
+$AuthClient->setLogger($Logger);
+$RpcClient = $AuthClient->getRpcClient();
 try {
-    $result = $Client->CompanySearch();
+    $result = $RpcClient->call('CompanySearch');
     echo 'Success!', PHP_EOL;
     var_dump($result);
 } catch (\Exception $ex){

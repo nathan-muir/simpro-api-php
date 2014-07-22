@@ -1,11 +1,11 @@
 <?php
-
 namespace SimPro\Api;
 
-use \Eher\OAuth\Consumer as OAuthConsumer;
-use \Eher\OAuth\Token as OAuthToken;
-use \Eher\OAuth\Request as OAuthRequest;
-use \Eher\OAuth\SignatureMethod as OAuthSignatureMethod;
+use \Ndm\JsonRpc\Client\HttpClient;
+use \Ndm\OAuth\Consumer as OAuthConsumer;
+use \Ndm\OAuth\Token as OAuthToken;
+use \Ndm\OAuth\Request as OAuthRequest;
+
 
 /**
  */
@@ -20,6 +20,8 @@ class Client implements \Psr\Log\LoggerAwareInterface {
 
     const ACCESS_TOKEN_URL = 'https://%s/api/oauth/access_token.php';
 
+    const GATEWAY_URL = 'https://%s/api/oauth/gateway.php?oauth_consumer_key=%s';
+
     const AUTHORIZE_URL = 'https://%s/oauth/authorize.php?oauth_token=%s';
 
     const OAUTH_REALM = 'simPROAPI';
@@ -29,24 +31,15 @@ class Client implements \Psr\Log\LoggerAwareInterface {
     private $logger;
 
     /**
-     * @var \Tivoka\Client\Connection
-     */
-    private $connection;
-
-    /**
-     * @var \Eher\OAuth\Consumer
+     * @var OAuthConsumer
      */
     private $consumer;
 
     /**
-     * @var \Eher\OAuth\Token
+     * @var OAuthToken
      */
-    private $accessToken;
+    public $accessToken;
 
-    /**
-     * @var \Eher\OAuth\SignatureMethod
-     */
-    private $signatureMethod;
     /**
      * @var string
      */
@@ -54,66 +47,49 @@ class Client implements \Psr\Log\LoggerAwareInterface {
 
 
     /**
-     * @param string                       $host The host name of the simPRO installation. If a port is required, it can be in the format '{hostName}:{port}'
-     * @param \Eher\OAuth\Consumer         $consumer
-     * @param \Eher\OAuth\Token            $accessToken
+     * @param string                $host The host name of the simPRO installation. If a port is required, it can be in the format '{hostName}:{port}'
+     * @param OAuthConsumer         $consumer
+     * @param OAuthToken            $accessToken
      *
      * @throws \Exception
      */
-    public function __construct($host, OAuthConsumer $consumer, OAuthToken $accessToken = null, OAuthSignatureMethod $signatureMethod = null){
+    public function __construct($host, OAuthConsumer $consumer, OAuthToken $accessToken = null){
         // check the host name
         if (!$this->isValidHost($host)){
-            throw new \Exception("Invalid host: '{$host}'");
+            throw new \RuntimeException("Invalid host: '{$host}'");
         }
         // set the consumer, token & signature method
         $this->consumer = $consumer;
         $this->accessToken = $accessToken;
-        if ($signatureMethod === null){
-            $signatureMethod = new \Eher\OAuth\HmacSha1();
-        }
-        $this->signatureMethod = $signatureMethod;
         // set the host
         $this->host = $host;
-        // generate the API URL from the host
-        $url = sprintf(self::API_URL, $this->host);
-        // create a JSON-RPC client connection to the url
-        $this->connection = \Tivoka\Client::connect($url);
-        // configure the specification setting
-        $this->connection->useSpec(1.0);
+
         // Default the logger to null - can be overwritten using setLogger
         $this->logger = new \Psr\Log\NullLogger();
     }
 
+    /**
+     * @return \Ndm\JsonRpc\Client\Client
+     */
+    public function hasAccessToken(){
+        return !empty($this->accessToken);
+    }
 
     /**
-     * @param string $method
-     * @param string $args
-     * @return mixed
-     *
-     * @throws \Tivoka\Exception\RemoteProcedureException
+     * Clears the access token
      */
-    public function __call($method, $args){
-        // log the incoming call
-        $this->logger->info("Performing Request", array("host"=>$this->host, "method"=>$method, "args"=>$args));
-        // reset the headers
-        $this->connection->headers = array();
-        // Configure the OAuth request & Sign
-        $oAuthRequest = OAuthRequest::from_consumer_and_token($this->consumer, $this->accessToken, 'POST', sprintf(self::API_URL, $this->host));
-        $oAuthRequest->sign_request($this->signatureMethod, $this->consumer, $this->accessToken);
-        // get the signature header - and set on the connection
-        $header = $oAuthRequest->to_header(self::OAUTH_REALM);
-        list($label, $value) = explode(':', $header, 2);
-        $this->connection->setHeader($label,$value);
-        // perform the JSON-RPC Request
-        $rpcRequest = new \Tivoka\Client\Request($method, $args);
-        $this->connection->send($rpcRequest);
-        // check for errors
-        if($rpcRequest->error !== null) {
-            $this->logger->error("Request Failed", array("host"=>$this->host, "method"=>$method, "args"=>$args, "errorMessage"=>$rpcRequest->errorData["faultString"]));
-            throw new \Tivoka\Exception\RemoteProcedureException($rpcRequest->errorData["faultString"], $rpcRequest->errorData["faultCode"]);
-        }
-        // return the result if successul
-        return $rpcRequest->result;
+    public function clearAccessToken(){
+        $this->accessToken = null;
+    }
+
+    /**
+     * @return \Ndm\JsonRpc\Client\Client
+     */
+    public function getRpcClient(){
+        // generate the API URL from the host
+        $url = sprintf(self::API_URL, $this->host);
+        // create a JSON-RPC client connection to the url
+        return HttpClient::connectOAuth($url, $this->consumer, $this->accessToken);
     }
 
 
@@ -151,7 +127,7 @@ class Client implements \Psr\Log\LoggerAwareInterface {
 
     /**
      * @param string $callbackUrl
-     * @return \Eher\OAuth\Token
+     * @return OAuthToken
      * @throws \Exception
      */
     public function getRequestToken($callbackUrl = 'oob'){
@@ -159,11 +135,11 @@ class Client implements \Psr\Log\LoggerAwareInterface {
         // create the URL for the Request Token Endpoint
         $url = sprintf(self::REQUEST_TOKEN_URL, $this->host);
         // create an OAuth Request- configure with local parameters
-        $oAuthRequest = OAuthRequest::from_consumer_and_token($this->consumer, null, 'GET', $url);
-        $oAuthRequest->set_parameter('oauth_callback',$callbackUrl);
-        $oAuthRequest->sign_request($this->signatureMethod, $this->consumer, null);
+        $oAuthRequest = OAuthRequest::fromConsumerAndToken($this->consumer, null, 'GET', $url);
+        $oAuthRequest->setParameter('oauth_callback',$callbackUrl);
+        $oAuthRequest->signRequest($this->consumer);
         // Perform request & Retrieve result
-        $headers = array($oAuthRequest->to_header(), 'Accept: application/x-www-form-urlencoded');
+        $headers = array($oAuthRequest->toHeader(), 'Accept: application/x-www-form-urlencoded');
         $resultString = $this->performRequest($url, 'GET', $headers);
         // parse the result string (should be www-form-urlencoded
         parse_str($resultString, $result);
@@ -182,31 +158,31 @@ class Client implements \Psr\Log\LoggerAwareInterface {
 
 
     /**
-     * @param \Eher\OAuth\Token $requestToken
+     * @param OAuthToken $requestToken
      * @return string
      */
-    public function getAuthorizeUrl(\Eher\OAuth\Token $requestToken){
+    public function getAuthorizeUrl(OAuthToken $requestToken){
         return sprintf(self::AUTHORIZE_URL, $this->host, urlencode($requestToken->key));
     }
 
 
     /**
-     * @param \Eher\OAuth\Token $requestToken
+     * @param OAuthToken $requestToken
      * @param string            $verifier
      *
      * @throws \Exception
-     * @return \Eher\OAuth\Token
+     * @return OAuthToken
      */
-    public function getAccessToken(\Eher\OAuth\Token $requestToken, $verifier){
+    public function getAccessToken(OAuthToken $requestToken, $verifier){
         $this->logger->info("Obtaining Access Token", array("host"=>$this->host, "verifier"=>$verifier));
         // create the URL for the Access Token Endpoint
         $url = sprintf(self::ACCESS_TOKEN_URL, $this->host);
         // create an OAuth Request- configure with local parameters
-        $oAuthRequest = OAuthRequest::from_consumer_and_token($this->consumer, $requestToken, 'GET', $url);
-        $oAuthRequest->set_parameter('oauth_verifier', $verifier);
-        $oAuthRequest->sign_request($this->signatureMethod, $this->consumer, $requestToken);
+        $oAuthRequest = OAuthRequest::fromConsumerAndToken($this->consumer, $requestToken, 'GET', $url);
+        $oAuthRequest->setParameter('oauth_verifier', $verifier);
+        $oAuthRequest->signRequest($this->consumer, $requestToken);
         // Perform request & Retrieve result
-        $headers = array($oAuthRequest->to_header(), 'Accept: application/x-www-form-urlencoded');
+        $headers = array($oAuthRequest->toHeader(), 'Accept: application/x-www-form-urlencoded');
         $resultString = $this->performRequest($url, 'GET', $headers);
         // parse the result string (should be www-form-urlencoded
         parse_str($resultString, $result);
@@ -225,9 +201,42 @@ class Client implements \Psr\Log\LoggerAwareInterface {
         return $this->accessToken;
     }
 
+    /**
+     * @param string $username
+     * @param string $password
+     * @throws \Exception
+     * @return OAuthToken
+     */
+    public function getAccessTokenViaGateway($username, $password){
+        $this->logger->info("Obtaining Request Token via Gateway", array("host"=>$this->host, "username"=>$username));
+        // create url with consumer_key
+        $url = sprintf(self::GATEWAY_URL, $this->host, urlencode($this->consumer->key));
+        // create auth header
+        $headers = array(
+            'Authorization: Basic ' . base64_encode("{$username}:{$password}")
+        );
+
+        $resultString = $this->performRequest($url, 'GET', $headers);
+
+        parse_str($resultString, $result);
+        // detect problems
+        if (isset($result['oauth_problem'])){
+            $this->logger->error("Failed to obtain Request Token via Gateway", array("host"=>$this->host, "username"=>$username, "problem"=> $result['oauth_problem']));
+            throw new \Exception("Failed to retrieve Request Token via Gateway because: {$result['oauth_problem']}");
+        }
+        if (!isset($result['oauth_token']) || !isset($result['oauth_token_secret']) || !isset($result['oauth_verifier'])){
+            $this->logger->error("Failed to obtain Request Token via Gateway", array("host"=>$this->host, "username"=>$username));
+            throw new \Exception("Failed to retrieve Request Token via Gateway.");
+        }
+        // create the request token
+        $requestToken = new OAuthToken($result['oauth_token'], $result['oauth_token_secret']);
+        $verifier = $result['oauth_verifier'];
+        // obtain the access token
+        return $this->getAccessToken($requestToken, $verifier);
+    }
+
 
     /**
-     * @todo Check Status Codes / Response body on error f complete error reporting
      * @param string $url
      * @param string $method
      * @param array  $headers
@@ -237,23 +246,51 @@ class Client implements \Psr\Log\LoggerAwareInterface {
      * @throws \Exception
      */
     private function performRequest($url, $method='GET', $headers=array(), $content=''){
-         $context = array(
+         $options = array(
             'http' => array(
                 'content' => $content,
-                'header' => implode("\r\n", $headers) . "\r\n",
-                'method' => $method,
+                'header'  => $headers,
+                'method'  => $method,
                 'timeout' => 10.0,
                 'ignore_errors'=>true
             )
         );
-        $response = file_get_contents($url, false, stream_context_create($context));
+        $context = stream_context_create($options);
+        // connect and open the stream
+        $stream = fopen($url, 'r', false, $context);
+        // get the response headers etc.
+        $headers = stream_get_meta_data($stream);
+        // actual data at $url
+        $content = stream_get_contents($stream);
+        fclose($stream);
 
-        if ($response === false){
-            $this->logger->error("Request Failed", array('url'=>$url, 'method'=>$method, 'headers'=>$headers, 'content'=>$content));
-            throw new \Exception("Error performing request {$url}");
+        if (!isset($headers['wrapper_data'])){
+            throw new \Exception("Failed to connect to URL {$url}");
         }
-        return $response;
+        $this->logger->info('Received Reply', array('headers'=>$headers, 'content'=>$content));
+        list ($successful, $statusCode, $statusMessage) = $this->checkStatus($headers['wrapper_data']);
+        if (!$successful){
+            $this->logger->error('Request was not successful',array('url'=>$url, 'context_options'=>$options, 'headers'=>$headers, 'content'=>$content));
+            throw new \Exception("Request failed, received: {$statusCode} {$statusMessage}");
+        }
+        return $content;
     }
+
+    /**
+     * @param $headers
+     * @return array
+     */
+    private function checkStatus($headers){
+        if (isset($headers[0]) && count($parts = explode(' ', $headers[0], 3)) == 3) {
+            $statusCode = (integer) $parts[1];
+            $statusMessage = $parts[2];
+            $success = (200 <= $statusCode  && $statusCode < 300);
+            return array($success, $statusCode, $statusMessage);
+        } else {
+            return array(false, 0, "Unknown");
+        }
+    }
+
     /**
      * Sets a logger instance on the object
      *

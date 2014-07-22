@@ -3,10 +3,20 @@
     "type": "library",
     "license": "MIT",
     "description": "A library using a combination of JSON-RPC and OAuth 1.0 and OAuth for the client",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/nathan-muir/oauth-php"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/nathan-muir/json-rpc"
+        }
+    ],
     "require": {
         "php": ">=5.3.0",
-        "eher/OAuth": "1.0.*",
-        "tivoka/tivoka":"3.1.*",
+        "nathan-muir/json-rpc-1": "*",
+        "nathan-muir/oauth": "1.0.*",
         "psr/log":"1.0.*",
         "monolog/monolog": "1.3.*"
     },

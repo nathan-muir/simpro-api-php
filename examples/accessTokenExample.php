@@ -3,7 +3,8 @@
 namespace MyCompany;
 
 use SimPro\Api\Client as SimProClient;
-use Eher\OAuth\Consumer as OAuthConsumer;
+use Ndm\OAuth\Consumer as OAuthConsumer;
+use Ndm\OAuth\SignatureMethod\Hmac;
 use \Monolog\Logger;
 
 if (PHP_SAPI != 'cli') die("This example must be run from the command line");
@@ -18,17 +19,17 @@ define("CALLBACK_URL", "oob");
 $Logger = new Logger('api-client');
 $Logger->pushHandler(new \Monolog\Handler\StreamHandler('php://stderr'), Logger::INFO);
 
-$Client = new SimProClient(SERVER , new OAuthConsumer(CONSUMER_KEY, CONSUMER_SECRET));
-$Client->setLogger($Logger);
+$AuthClient = new SimProClient(SERVER , new OAuthConsumer(CONSUMER_KEY, CONSUMER_SECRET, new Hmac()));
+$AuthClient->setLogger($Logger);
 
 // get a request token
 
 try {
-    $requestToken = $Client->getRequestToken(CALLBACK_URL);
+    $requestToken = $AuthClient->getRequestToken(CALLBACK_URL);
 
-    echo 'RequestToken: ' . $requestToken->to_string(),PHP_EOL,PHP_EOL;
+    echo 'RequestToken: ' . $requestToken->toString(),PHP_EOL,PHP_EOL;
 
-    $authorizeUrl = $Client->getAuthorizeUrl($requestToken);
+    $authorizeUrl = $AuthClient->getAuthorizeUrl($requestToken);
 
     echo 'AuthorizeUrl: ' . $authorizeUrl, PHP_EOL;
 
@@ -40,11 +41,13 @@ try {
 
     // obtain the access token
 
-    $accessToken = $Client->getAccessToken($requestToken, $verifier);
+    $accessToken = $AuthClient->getAccessToken($requestToken, $verifier);
 
-    echo 'Access Token: ' . $accessToken->to_string(),PHP_EOL,PHP_EOL;
+    echo 'Access Token: ' . $accessToken->toString(),PHP_EOL,PHP_EOL;
 
-    $result = $Client->CompanySearch();
+    $RpcClient = $AuthClient->getRpcClient();
+
+    $result = $RpcClient->call('CompanySearch');
 
     echo 'Success!', PHP_EOL;
 
